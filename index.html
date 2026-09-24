@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WgetLAB — Download de mídias a partir de CSV</title>
+  <meta name="description" content="Arraste um CSV, indique a coluna com URLs e baixe imagens, áudios e vídeos direto para uma pasta local. Gera também o script R equivalente.">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous"></script>
+  <style>
+    /* ── Tokens ─────────────────────────────────────────────────────────── */
+    :root {
+      --bg:          #F4F5F8;
+      --surface:     #FFFFFF;
+      --surface2:    #EDEEF3;
+      --ink:         #161B26;
+      --ink-mid:     #4A5266;
+      --ink-muted:   #7A8299;
+      --accent:      #1A6B63;
+      --accent-soft: #D2E8E6;
+      --border:      #D4D8E4;
+      --border-soft: #E8EAF0;
+      --shadow:      0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+      --code-bg:     #F7F8FA;
+
+      --c-h:     #1A7A52;  --c-h-bg: #E6F4ED;
+      --c-m:     #A0681E;  --c-m-bg: #FBF0DC;
+      --c-l:     #B03535;  --c-l-bg: #FAEAEA;
+      --c-n:     #7A8299;  --c-n-bg: #EDEEF3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg:#0D1117; --surface:#161B22; --surface2:#1E2430; --ink:#E2E6F0;
+        --ink-mid:#9BA5BC; --ink-muted:#5E6880; --accent:#2AA89D; --accent-soft:#1A3533;
+        --border:#30363F; --border-soft:#21272F; --shadow:0 1px 3px rgba(0,0,0,.4); --code-bg:#11161D;
+        --c-h:#3CB87A; --c-h-bg:#0F2B1F; --c-m:#D4943A; --c-m-bg:#2B1F08;
+        --c-l:#E06060; --c-l-bg:#2B0F0F; --c-n:#5E6880; --c-n-bg:#1E2430;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg:#0D1117; --surface:#161B22; --surface2:#1E2430; --ink:#E2E6F0;
+      --ink-mid:#9BA5BC; --ink-muted:#5E6880; --accent:#2AA89D; --accent-soft:#1A3533;
+      --border:#30363F; --border-soft:#21272F; --shadow:0 1px 3px rgba(0,0,0,.4); --code-bg:#11161D;
+      --c-h:#3CB87A; --c-h-bg:#0F2B1F; --c-m:#D4943A; --c-m-bg:#2B1F08;
+      --c-l:#E06060; --c-l-bg:#2B0F0F; --c-n:#5E6880; --c-n-bg:#1E2430;
+    }
+    :root[data-theme="light"] {
+      --bg:#F4F5F8; --surface:#FFFFFF; --surface2:#EDEEF3; --ink:#161B26;
+      --ink-mid:#4A5266; --ink-muted:#7A8299; --accent:#1A6B63; --accent-soft:#D2E8E6;
+      --border:#D4D8E4; --border-soft:#E8EAF0; --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05); --code-bg:#F7F8FA;
+      --c-h:#1A7A52; --c-h-bg:#E6F4ED; --c-m:#A0681E; --c-m-bg:#FBF0DC;
+      --c-l:#B03535; --c-l-bg:#FAEAEA; --c-n:#7A8299; --c-n-bg:#EDEEF3;
+    }
+
+    /* ── Reset & Base ───────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); }
+    button { cursor: pointer; font-family: inherit; }
+    code, pre { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+    .app-shell { display: flex; flex-direction: column; min-height: calc(100vh - 80px); }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    .app-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.9rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .app-logo {
+      font-family: Georgia, serif;
+      font-size: 1.1rem;
+      color: var(--ink);
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    .app-logo:hover { opacity: 0.75; }
+    .app-logo span { color: var(--accent); }
+    .stepper { display: flex; align-items: center; flex: 1; justify-content: center; }
+    .step-item { display: flex; align-items: center; gap: 0.4rem; color: var(--ink-muted); font-size: 0.82rem; }
+    .step-item.active { color: var(--ink); font-weight: 600; }
+    .step-item.done   { color: var(--accent); }
+    .step-dot {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+    }
+    .step-item.active .step-dot, .step-item.done .step-dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .step-line { width: 40px; height: 1.5px; background: var(--border); margin: 0 4px; }
+    .step-line.done { background: var(--accent); }
+    .theme-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 0.3rem 0.5rem; color: var(--ink-muted); font-size: 0.85rem; line-height: 1; flex-shrink: 0;
+    }
+    .theme-btn:hover { background: var(--surface2); }
+    @media (max-width: 560px) {
+      .app-header { padding: 0.8rem 1rem; gap: 0.8rem; }
+      .step-item span { display: none; }
+      .step-line { width: 22px; }
+    }
+
+    /* ── Main content ───────────────────────────────────────────────────── */
+    .step-section { display: none; flex: 1; padding: 2rem 1.5rem 4rem; max-width: 960px; margin: 0 auto; width: 100%; }
+    .step-section.active { display: block; }
+    @media (max-width: 560px) { .step-section { padding: 1.5rem 1rem 3rem; } }
+    .step-title { font-family: Georgia, serif; font-size: 1.5rem; font-weight: normal; margin-bottom: 0.4rem; color: var(--ink); }
+    .step-desc { color: var(--ink-muted); font-size: 0.9rem; margin-bottom: 1.8rem; }
+
+    /* ── Drop zone ──────────────────────────────────────────────────────── */
+    .dropzone {
+      border: 2px dashed var(--border); border-radius: 10px; padding: 3rem 2rem;
+      text-align: center; background: var(--surface);
+      transition: border-color .15s, background .15s; cursor: pointer; margin-bottom: 1.5rem;
+    }
+    .dropzone.drag-over { border-color: var(--accent); background: var(--accent-soft); }
+    .dropzone-icon { font-size: 2.2rem; margin-bottom: 0.8rem; }
+    .dropzone-title { font-weight: 600; color: var(--ink); margin-bottom: 0.3rem; }
+    .dropzone-hint { font-size: 0.83rem; color: var(--ink-muted); line-height: 1.6; }
+    .dropzone-hint strong { color: var(--ink-mid); }
+    #file-input { display: none; }
+
+    .file-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.7rem 1rem; display: none; align-items: center; gap: 0.8rem;
+      box-shadow: var(--shadow); margin-bottom: 1.5rem;
+    }
+    .file-card.visible { display: flex; }
+    .file-card-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .file-card-name { font-size: 0.88rem; color: var(--ink); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-card-meta { font-size: 0.78rem; color: var(--ink-muted); white-space: nowrap; }
+    .remove-btn { background: none; border: none; color: var(--ink-muted); font-size: 1rem; padding: 0.2rem 0.4rem; border-radius: 4px; flex-shrink: 0; }
+    .remove-btn:hover { background: var(--c-l-bg); color: var(--c-l); }
+
+    /* ── Buttons ────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.55rem 1.1rem; border-radius: 6px; font-size: 0.88rem; font-weight: 600;
+      border: 1.5px solid transparent; transition: background .12s, opacity .12s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-primary:hover { opacity: 0.88; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: var(--ink-mid); border-color: var(--border); }
+    .btn-ghost:hover:not(:disabled) { background: var(--surface2); }
+    .btn-danger { background: transparent; color: var(--c-l); border-color: var(--c-l); }
+    .btn-danger:hover:not(:disabled) { background: var(--c-l-bg); }
+    .btn-row { display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; }
+    .btn-small {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      padding: 0.25rem 0.65rem; font-size: 0.76rem; color: var(--ink-mid); text-decoration: none;
+    }
+    .btn-small:hover:not(:disabled) { background: var(--surface2); color: var(--ink); }
+    .select-link { background: none; border: none; color: var(--accent); font-size: 0.74rem; text-transform: none; letter-spacing: 0; font-weight: 600; padding: 0 0.2rem; }
+
+    /* ── Banners ────────────────────────────────────────────────────────── */
+    .banner { border-radius: 6px; padding: 0.65rem 1rem; font-size: 0.84rem; margin-bottom: 1rem; display: none; line-height: 1.55; }
+    .banner.visible { display: block; }
+    .banner-error { background: var(--c-l-bg); color: var(--c-l); border: 1px solid var(--c-l); }
+    .banner-warn  { background: var(--c-m-bg); color: var(--c-m); border: 1px solid var(--c-m); }
+    .banner-info  { background: var(--accent-soft); color: var(--ink-mid); border: 1px solid var(--accent); }
+
+    /* ── Info box (step 1) ──────────────────────────────────────────────── */
+    .info-box {
+      margin-top: 1.4rem; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 1rem 1.2rem; font-size: 0.82rem; color: var(--ink-muted); line-height: 1.6;
+    }
+    .info-box h3 { font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-mid); margin-bottom: 0.5rem; }
+    .info-box ul { padding-left: 1.1rem; }
+    .info-box li { margin-bottom: 0.25rem; }
+    .info-box code { font-size: 0.76rem; background: var(--surface2); padding: 0.05rem 0.3rem; border-radius: 3px; color: var(--ink-mid); word-break: break-all; }
+
+    /* ── Config layout ──────────────────────────────────────────────────── */
+    .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; align-items: start; margin-bottom: 1.5rem; }
+    @media (max-width: 760px) { .config-grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 1.2rem; }
+    .config-grid .panel { margin-bottom: 0; }
+    .panel-header {
+      background: var(--surface2); padding: 0.65rem 1rem; font-size: 0.78rem; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--ink-mid); font-weight: 600; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    .panel-header .num { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 0.66rem; align-items: center; justify-content: center; margin-right: 0.45rem; letter-spacing: 0; }
+    .panel-body { padding: 0.9rem 1rem; }
+    .panel-body.list { padding: 0.4rem 0; max-height: 330px; overflow-y: auto; }
+    .panel-hint { font-size: 0.78rem; color: var(--ink-muted); margin-top: 0.5rem; line-height: 1.5; }
+
+    .check-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.38rem 1rem; cursor: pointer; transition: background .1s; }
+    .check-row:hover { background: var(--surface2); }
+    .check-row input { accent-color: var(--accent); width: 15px; height: 15px; flex-shrink: 0; }
+    .check-label { flex: 1; font-size: 0.85rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .check-row.nourl .check-label { color: var(--ink-muted); }
+    .pill { font-size: 0.7rem; font-weight: 600; padding: 0.08rem 0.45rem; border-radius: 10px; white-space: nowrap; background: var(--c-n-bg); color: var(--c-n); }
+    .pill.url { background: var(--accent-soft); color: var(--accent); }
+    .pill.media { background: var(--c-h-bg); color: var(--c-h); }
+    .list-sep { font-size: 0.72rem; color: var(--ink-muted); padding: 0.5rem 1rem 0.2rem; text-transform: uppercase; letter-spacing: 0.06em; border-top: 1px solid var(--border-soft); margin-top: 0.3rem; }
+
+    .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.9rem; }
+    .field:last-child { margin-bottom: 0; }
+    .field label, .field-label { font-size: 0.8rem; color: var(--ink-mid); font-weight: 600; }
+    .input, select.input {
+      border: 1px solid var(--border); border-radius: 5px; padding: 0.4rem 0.6rem; font-size: 0.86rem;
+      background: var(--bg); color: var(--ink); font-family: inherit; width: 100%; min-width: 0;
+    }
+    .input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+    .input.num { width: 110px; }
+    .radio-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.86rem; padding: 0.3rem 0; cursor: pointer; flex-wrap: wrap; }
+    .radio-row input { accent-color: var(--accent); }
+    .inline { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .sample-opts { margin: 0.3rem 0 0 1.6rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .sample-opts.disabled { opacity: 0.45; pointer-events: none; }
+    .sample-opts .inline span { font-size: 0.82rem; color: var(--ink-muted); }
+
+    .folder-box { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+    .folder-name { font-size: 0.86rem; color: var(--ink-muted); font-style: italic; }
+    .folder-name.set { color: var(--ink); font-style: normal; font-weight: 600; }
+    .folder-path { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; color: var(--ink-mid); background: var(--surface2); padding: 0.35rem 0.6rem; border-radius: 5px; word-break: break-all; margin-top: 0.7rem; }
+
+    details.adv summary { cursor: pointer; font-size: 0.82rem; color: var(--ink-mid); font-weight: 600; margin-top: 0.4rem; }
+    details.adv[open] summary { margin-bottom: 0.7rem; }
+
+    /* ── Summary / preview ─────────────────────────────────────────────── */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.7rem; margin-bottom: 1.2rem; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.9rem; }
+    .stat-val { font-size: 1.35rem; font-weight: 700; color: var(--ink); line-height: 1.2; font-variant-numeric: tabular-nums; }
+    .stat-lbl { font-size: 0.74rem; color: var(--ink-muted); }
+    .stat.ok .stat-val { color: var(--c-h); }
+    .stat.fail .stat-val { color: var(--c-l); }
+    .stat.skip .stat-val { color: var(--c-m); }
+
+    .preview-table, .log-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .preview-table th, .log-table th {
+      text-align: left; font-weight: 600; color: var(--ink-muted); font-size: 0.72rem; text-transform: uppercase;
+      letter-spacing: 0.05em; padding: 0.45rem 0.8rem; border-bottom: 1px solid var(--border); background: var(--surface);
+      position: sticky; top: 0;
+    }
+    .preview-table td, .log-table td { padding: 0.38rem 0.8rem; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+    .url-cell { font-family: ui-monospace, Menlo, monospace; font-size: 0.74rem; color: var(--ink-mid); word-break: break-all; }
+    .url-cell a { color: inherit; text-decoration: none; }
+    .url-cell a:hover { color: var(--accent); text-decoration: underline; }
+    .name-cell { font-family: ui-monospace, Menlo, monospace; font-size: 0.76rem; white-space: nowrap; }
+    .table-wrap { max-height: 360px; overflow: auto; }
+    .status { font-size: 0.7rem; font-weight: 700; padding: 0.08rem 0.45rem; border-radius: 10px; white-space: nowrap; }
+    .status.ok { background: var(--c-h-bg); color: var(--c-h); }
+    .status.fail { background: var(--c-l-bg); color: var(--c-l); }
+    .status.skip { background: var(--c-m-bg); color: var(--c-m); }
+    .err-cell { color: var(--c-l); font-size: 0.74rem; }
+
+    /* ── Progress ───────────────────────────────────────────────────────── */
+    .progress { height: 10px; background: var(--surface2); border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+    .progress-bar { height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+    .progress-meta { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--ink-muted); margin: 0.45rem 0 1.2rem; gap: 1rem; flex-wrap: wrap; }
+    .run-status { font-weight: 600; color: var(--ink-mid); }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+    .seg button { background: none; border: none; font-size: 0.72rem; padding: 0.2rem 0.6rem; color: var(--ink-mid); text-transform: none; letter-spacing: 0; }
+    .seg button.on { background: var(--accent); color: #fff; }
+
+    /* ── R script ───────────────────────────────────────────────────────── */
+    .code {
+      background: var(--code-bg); color: var(--ink); font-size: 0.76rem; line-height: 1.55;
+      padding: 1rem; overflow: auto; max-height: 460px; white-space: pre; border-top: 1px solid var(--border-soft);
+    }
+    .code .c { color: var(--ink-muted); }
+    details.rbox > summary { list-style: none; cursor: pointer; }
+    details.rbox > summary::-webkit-details-marker { display: none; }
+    details.rbox > summary .chev { transition: transform .15s; display: inline-block; margin-right: 0.35rem; }
+    details.rbox[open] > summary .chev { transform: rotate(90deg); }
+
+    /* ── Footer ─────────────────────────────────────────────────────────── */
+    .app-footer {
+      text-align: center; padding: 1.2rem 1.5rem; font-size: 0.75rem; color: var(--ink-muted);
+      border-top: 1px solid var(--border); margin-top: auto; line-height: 1.8;
+    }
+    .app-footer a { color: var(--ink-muted); }
+    .app-footer strong { color: var(--ink-mid); }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- ── Header ──────────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <a class="app-logo" href="./">Wget<span>LAB</span></a>
+    <nav class="stepper" aria-label="Progresso">
+      <div class="step-item active" id="s-dot-1"><div class="step-dot">1</div><span>Upload</span></div>
+      <div class="step-line" id="s-line-1"></div>
+      <div class="step-item" id="s-dot-2"><div class="step-dot">2</div><span>Configurar</span></div>
+      <div class="step-line" id="s-line-2"></div>
+      <div class="step-item" id="s-dot-3"><div class="step-dot">3</div><span>Download</span></div>
+    </nav>
+    <button class="theme-btn" id="theme-btn" title="Alternar tema" aria-label="Alternar tema claro/escuro">🌙</button>
+  </header>
+
+  <!-- ── Step 1 — Upload ─────────────────────────────────────────────── -->
+  <section class="step-section active" id="step-upload">
+    <h1 class="step-title">Carregar planilha com URLs</h1>
+    <p class="step-desc">Arraste um arquivo CSV que tenha pelo menos uma coluna com links para imagens, áudios ou vídeos. O arquivo é lido no seu navegador e não é enviado a nenhum servidor.</p>
+
+    <div id="browser-warn" class="banner banner-warn"></div>
+
+    <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Zona de upload">
+      <div class="dropzone-icon">📂</div>
+      <div class="dropzone-title">Arraste o arquivo CSV aqui</div>
+      <div class="dropzone-hint">ou <strong>clique para selecionar</strong> · Formato: <strong>.csv</strong> (UTF-8)</div>
+    </div>
+    <input type="file" id="file-input" accept=".csv,.tsv,.txt,text/csv">
+
+    <div id="error-upload" class="banner banner-error"></div>
+    <div class="file-card" id="file-card">
+      <div class="file-card-icon">📄</div>
+      <div class="file-card-name" id="file-name"></div>
+      <div class="file-card-meta" id="file-meta"></div>
+      <button class="remove-btn" id="file-remove" title="Remover" aria-label="Remover arquivo">✕</button>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-continue-1" disabled>Continuar →</button>
+    </div>
+
+    <div class="info-box">
+      <h3>Formatos de célula reconhecidos</h3>
+      <ul>
+        <li><strong>Uma URL por célula</strong>: <code>https://p16.tiktokcdn.com/…/capa.jpeg</code></li>
+        <li><strong>Várias URLs separadas</strong> por <code>|</code>, <code>;</code>, vírgula ou espaço: <code>https://pbs.twimg.com/media/A?format=jpg | https://video.twimg.com/…/v.mp4</code></li>
+        <li><strong>JSON</strong> com URLs dentro, como a coluna <code>multimedia</code> da Meta Content Library: <code>[{"type":"video","url":"https://…"}]</code></li>
+      </ul>
+      <p style="margin-top:.5rem">Células vazias, <code>NA</code> e <code>NULL</code> são ignoradas. A extensão de cada arquivo (<code>jpg</code>, <code>png</code>, <code>mp4</code>, <code>m4a</code>…) é detectada pela URL ou pelo próprio conteúdo baixado.</p>
+    </div>
+  </section>
+
+  <!-- ── Step 2 — Configurar ─────────────────────────────────────────── -->
+  <section class="step-section" id="step-config">
+    <h1 class="step-title">Configurar o download</h1>
+    <p class="step-desc">Escolha a coluna com as URLs, quantas linhas baixar e a pasta de destino no seu computador.</p>
+
+    <div class="config-grid">
+      <!-- Coluna(s) -->
+      <div class="panel">
+        <div class="panel-header">
+          <span><span class="num">1</span>Coluna(s) com URLs</span>
+          <span><button class="select-link" id="cols-none">Limpar</button></span>
+        </div>
+        <div class="panel-body list" id="col-list"></div>
+      </div>
+
+      <!-- Escopo + nome -->
+      <div>
+        <div class="panel">
+          <div class="panel-header"><span><span class="num">2</span>Linhas a baixar</span></div>
+          <div class="panel-body">
+            <label class="radio-row"><input type="radio" name="mode" value="all" checked> Todas as linhas com URL <span class="pill" id="eligible-pill">0</span></label>
+            <label class="radio-row"><input type="radio" name="mode" value="sample"> Amostra aleatória</label>
+            <div class="sample-opts disabled" id="sample-opts">
+              <div class="inline">
+                <input type="number" class="input num" id="sample-n" min="1" value="50" aria-label="Tamanho da amostra">
+                <span>linhas</span>
+              </div>
+              <div class="inline">
+                <span>Semente</span>
+                <input type="number" class="input num" id="seed" aria-label="Semente aleatória">
+                <button class="btn-small" id="reroll" title="Sortear outra amostra">🎲 Sortear outra</button>
+              </div>
+            </div>
+            <p class="panel-hint">A amostra é sorteada só entre as linhas que têm pelo menos uma URL nas colunas escolhidas. Com a mesma semente, o sorteio se repete.</p>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:1.2rem">
+          <div class="panel-header"><span><span class="num">3</span>Nome dos arquivos</span></div>
+          <div class="panel-body">
+            <div class="field">
+              <label for="id-col">Coluna de identificação</label>
+              <select class="input" id="id-col"></select>
+            </div>
+            <p class="panel-hint">Exemplo: <code class="name-cell" id="name-example"></code><br>Com várias URLs na mesma célula, o app acrescenta <code>_1</code>, <code>_2</code>… Se a URL não indicar a extensão, ela é detectada no download.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pasta -->
+    <div class="panel">
+      <div class="panel-header"><span><span class="num">4</span>Pasta de destino</span></div>
+      <div class="panel-body" id="folder-fs">
+        <div class="folder-box">
+          <button class="btn btn-ghost" id="pick-folder">📁 Escolher pasta…</button>
+          <span class="folder-name" id="folder-name">Nenhuma pasta escolhida</span>
+        </div>
+        <p class="panel-hint">Abre a janela do seu sistema. Navegue até onde quiser salvar e, se precisar, use o botão <strong>Nova pasta</strong> da própria janela. O navegador pedirá permissão para gravar nela.</p>
+        <div class="field" style="margin-top:.8rem">
+          <label for="subfolder">Criar subpasta dentro dela <span style="font-weight:400;color:var(--ink-muted)">(opcional, deixe vazio para salvar direto)</span></label>
+          <input class="input" id="subfolder" type="text" spellcheck="false">
+        </div>
+        <div class="folder-path" id="folder-path" style="display:none"></div>
+      </div>
+      <div class="panel-body" id="folder-zip" style="display:none">
+        <p style="font-size:.86rem">Este navegador não permite gravar direto numa pasta. Os arquivos serão reunidos num <strong>ZIP</strong> salvo na sua pasta de Downloads (nome do ZIP: <code class="name-cell" id="zip-name"></code>).</p>
+        <p class="panel-hint">Para gravar direto numa pasta escolhida por você, use Chrome, Edge ou Opera no computador. No modo ZIP, tudo fica na memória até o fim: evite milhares de vídeos de uma vez.</p>
+      </div>
+      <div class="panel-body" style="border-top:1px solid var(--border-soft)">
+        <details class="adv">
+          <summary>Opções avançadas</summary>
+          <div class="field">
+            <label for="concurrency">Downloads simultâneos</label>
+            <div class="inline"><input type="number" class="input num" id="concurrency" min="1" max="8" value="4"><span style="font-size:.8rem;color:var(--ink-muted)">de 1 a 8</span></div>
+          </div>
+          <label class="radio-row"><input type="checkbox" id="skip-existing" checked> Pular arquivos que já existem na pasta (permite retomar um download interrompido)</label>
+          <label class="radio-row"><input type="checkbox" id="write-manifest" checked> Gravar <code>wgetlab_manifest_….csv</code> na pasta ao final (linha, id, URL, arquivo, status)</label>
+        </details>
+      </div>
+    </div>
+
+    <!-- Resumo -->
+    <div class="stats">
+      <div class="stat"><div class="stat-val" id="st-rows">0</div><div class="stat-lbl">linhas no CSV</div></div>
+      <div class="stat"><div class="stat-val" id="st-eligible">0</div><div class="stat-lbl">linhas com URL</div></div>
+      <div class="stat"><div class="stat-val" id="st-selrows">0</div><div class="stat-lbl">linhas selecionadas</div></div>
+      <div class="stat"><div class="stat-val" id="st-files">0</div><div class="stat-lbl">arquivos a baixar</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header"><span>Prévia dos primeiros arquivos</span><span id="type-summary" style="text-transform:none;letter-spacing:0;font-weight:400"></span></div>
+      <div class="table-wrap" style="max-height:260px">
+        <table class="preview-table">
+          <thead><tr><th>Linha</th><th>Arquivo</th><th>URL</th></tr></thead>
+          <tbody id="preview-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="host-warn" class="banner banner-warn"></div>
+    <div id="error-config" class="banner banner-error"></div>
+
+    <details class="panel rbox" id="rbox-config">
+      <summary class="panel-header"><span><span class="chev">▸</span>Script R equivalente</span>
+        <span class="btn-row" style="gap:.4rem"><button class="btn-small" data-r="copy">Copiar</button><button class="btn-small" data-r="save">↓ .R</button></span>
+      </summary>
+      <pre class="code" data-r="code"></pre>
+    </details>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="btn-back-1">← Voltar</button>
+      <button class="btn btn-primary" id="btn-start">⬇ Iniciar download</button>
+      <span style="font-size:.8rem;color:var(--ink-muted)" id="start-hint"></span>
+    </div>
+  </section>
+
+  <!-- ── Step 3 — Download ───────────────────────────────────────────── -->
+  <section class="step-section" id="step-run">
+    <h1 class="step-title" id="run-title">Baixando arquivos</h1>
+    <p class="step-desc" id="run-desc"></p>
+
+    <div class="progress"><div class="progress-bar" id="prog-bar"></div></div>
+    <div class="progress-meta"><span class="run-status" id="run-status">Preparando…</span><span id="prog-text">0 / 0</span></div>
+
+    <div class="stats">
+      <div class="stat ok"><div class="stat-val" id="rs-ok">0</div><div class="stat-lbl">baixados</div></div>
+      <div class="stat fail"><div class="stat-val" id="rs-fail">0</div><div class="stat-lbl">falharam</div></div>
+      <div class="stat skip"><div class="stat-val" id="rs-skip">0</div><div class="stat-lbl">já existiam</div></div>
+      <div class="stat"><div class="stat-val" id="rs-bytes">0 B</div><div class="stat-lbl">gravados</div></div>
+    </div>
+
+    <div class="btn-row" style="margin-bottom:1.2rem">
+      <button class="btn btn-ghost" id="btn-pause">⏸ Pausar</button>
+      <button class="btn btn-danger" id="btn-cancel">✕ Cancelar</button>
+      <button class="btn btn-ghost" id="btn-manifest" disabled>↓ Manifesto CSV</button>
+      <button class="btn btn-ghost" id="btn-failures" disabled>↓ Falhas CSV</button>
+      <button class="btn btn-ghost" id="btn-retry" disabled>↻ Tentar falhas de novo</button>
+    </div>
+
+    <div id="fail-hint" class="banner banner-warn"></div>
+
+    <div class="panel">
+      <div class="panel-header"><span>Registro</span>
+        <span class="seg" role="group" aria-label="Filtro do registro">
+          <button class="on" data-filter="all">Todos</button><button data-filter="fail">Falhas</button><button data-filter="ok">Baixados</button>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="log-table">
+          <thead><tr><th>Status</th><th>Arquivo</th><th>Detalhe</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <details class="panel rbox" id="rbox-run">
+      <summary class="panel-header"><span><span class="chev">▸</span>Script R equivalente</span>
+        <span class="btn-row" style="gap:.4rem"><button class="btn-small" data-r="copy">Copiar</button><button class="btn-small" data-r="save">↓ .R</button></span>
+      </summary>
+      <pre class="code" data-r="code"></pre>
+    </details>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="btn-back-2">← Ajustar configuração</button>
+      <button class="btn btn-primary" id="btn-new">Novo CSV</button>
+    </div>
+  </section>
+
+</div><!-- app-shell -->
+
+<footer class="app-footer">
+  <strong>WgetLAB</strong> — download de mídias listadas em planilhas · tudo acontece no seu navegador, nenhum dado é enviado a servidores<br>
+  Desenvolvido pelo grupo de pesquisa <strong>coLAB/UFF</strong>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   WgetLAB — core logic
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const HAS_FS = typeof window.showDirectoryPicker === 'function';
+
+/* ── State ──────────────────────────────────────────────────────────────── */
+const state = {
+  fileName: '',
+  rows: [],          // array of objects (PapaParse header mode)
+  columns: [],       // header names, CSV order
+  colStats: {},      // col -> {cells, media}
+  selCols: [],       // selected URL columns (kept in CSV order)
+  idCol: '',
+  mode: 'all',
+  sampleN: 50,
+  seed: 1,
+  rowUrls: [],       // per row: {col: [urls]} for selected cols
+  eligible: [],      // 1-based row numbers with ≥1 URL
+  selectedRows: [],  // 1-based row numbers to download
+  tasks: [],         // [{row, id, col, k, n, url, base}]
+  dirHandle: null,   // folder chosen by the user
+  run: null          // current run
+};
+
+/* ── Helpers ────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtInt = n => n.toLocaleString('pt-BR');
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  const u = ['KB','MB','GB','TB']; let i = -1;
+  do { b /= 1024; i++; } while (b >= 1024 && i < u.length - 1);
+  return b.toFixed(b >= 100 ? 0 : 1).replace('.', ',') + ' ' + u[i];
+}
+function isEmptyCell(v) {
+  if (v === null || v === undefined) return true;
+  const s = String(v).trim();
+  return s === '' || s === 'NA' || s === 'N/A' || s === 'NULL' || s === 'null' || s === 'NaN';
+}
+function todayStamp(withTime) {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const s = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}`;
+  return withTime ? `${s}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}` : s;
+}
+function csvStem() { return state.fileName.replace(/\.[^.]+$/, ''); }
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function showBanner(id, html) { const el = $(id); el.innerHTML = html; el.classList.toggle('visible', !!html); }
+
+/* ── URL extraction ─────────────────────────────────────────────────────
+   Same rules as the generated R script (extrair_urls):
+   1. unescape JSON "\/"   2. regex for http(s) URLs
+   3. split "a,https://b"   4. strip trailing , ; . )   5. unique            */
+const URL_RE = /https?:\/\/[^\s|"'<>\[\]{}\\]+/g;
+function extractUrls(cell) {
+  if (isEmptyCell(cell)) return [];
+  const s = String(cell).replace(/\\\//g, '/');
+  const out = [];
+  for (const m of s.match(URL_RE) || []) {
+    for (let u of m.split(/,(?=https?:\/\/)/)) {
+      u = u.replace(/[,;.)]+$/, '');
+      if (u && !out.includes(u)) out.push(u);
+    }
+  }
+  return out;
+}
+
+/* ── File names & extensions ────────────────────────────────────────────── */
+const EXT_OK = /^(jpe?g|png|gif|webp|avif|bmp|tiff?|heic|svg|mp4|m4v|mov|webm|mkv|avi|3gp|mp3|m4a|aac|wav|ogg|oga|opus|flac|pdf)$/i;
+const EXT_ALIAS = { jpeg: 'jpg', tif: 'tiff', mpeg: 'mp3', quicktime: 'mov', 'x-m4a': 'm4a' };
+function normExt(e) {
+  if (!e) return null;
+  e = String(e).toLowerCase();
+  e = EXT_ALIAS[e] || e;
+  return EXT_OK.test(e) ? e : null;
+}
+function extFromUrl(url) {
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  const m = u.pathname.match(/\.([A-Za-z0-9]{2,5})$/);
+  const e = m && normExt(m[1]);
+  if (e) return e;
+  for (const key of ['format', 'mime_type', 'ext']) {
+    const v = u.searchParams.get(key);
+    if (v) { const t = normExt(v.split(/[_/]/).pop()); if (t) return t; }
+  }
+  return null;
+}
+// Magic bytes → extension (mirrors R's sniff_ext)
+function sniffExt(b) {
+  if (!b || b.length < 4) return null;
+  const at = (i, arr) => arr.every((x, j) => b[i + j] === x);
+  const str = (i, n) => String.fromCharCode(...b.slice(i, i + n));
+  if (at(0, [0xFF, 0xD8, 0xFF])) return 'jpg';
+  if (at(0, [0x89, 0x50, 0x4E, 0x47])) return 'png';
+  if (str(0, 4) === 'GIF8') return 'gif';
+  if (str(0, 4) === 'RIFF' && b.length >= 12) {
+    const t = str(8, 4);
+    if (t === 'WEBP') return 'webp';
+    if (t === 'WAVE') return 'wav';
+    if (t === 'AVI ') return 'avi';
+  }
+  if (b.length >= 12 && str(4, 4) === 'ftyp') {
+    const brand = str(8, 4);
+    if (brand.startsWith('M4A') || brand.startsWith('M4B')) return 'm4a';
+    if (brand === 'qt  ') return 'mov';
+    if (brand === 'avif') return 'avif';
+    if (['heic', 'heix', 'mif1'].includes(brand)) return 'heic';
+    return 'mp4';
+  }
+  if (at(0, [0x1A, 0x45, 0xDF, 0xA3])) return 'webm';
+  if (str(0, 3) === 'ID3' || (b[0] === 0xFF && (b[1] & 0xE0) === 0xE0)) return 'mp3';
+  if (str(0, 4) === 'OggS') return 'ogg';
+  if (str(0, 4) === 'fLaC') return 'flac';
+  if (str(0, 4) === '%PDF') return 'pdf';
+  return null;
+}
+const CT_EXT = {
+  'image/jpeg':'jpg','image/png':'png','image/gif':'gif','image/webp':'webp','image/avif':'avif','image/bmp':'bmp',
+  'image/tiff':'tiff','image/heic':'heic','image/svg+xml':'svg','video/mp4':'mp4','video/quicktime':'mov','video/webm':'webm',
+  'video/x-matroska':'mkv','video/3gpp':'3gp','audio/mpeg':'mp3','audio/mp4':'m4a','audio/x-m4a':'m4a','audio/aac':'aac',
+  'audio/wav':'wav','audio/x-wav':'wav','audio/ogg':'ogg','audio/opus':'opus','audio/flac':'flac','application/pdf':'pdf',
+  'text/html':'html','application/json':'json','text/plain':'txt'
+};
+function extFromContentType(ct) { return ct ? CT_EXT[ct.split(';')[0].trim().toLowerCase()] || null : null; }
+
+function cleanName(s) {
+  return String(s).replace(/[^\p{L}\p{N}._-]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+}
+function guessKind(url) {
+  const e = extFromUrl(url);
+  if (e) {
+    if (/^(jpg|png|gif|webp|avif|bmp|tiff|heic|svg)$/.test(e)) return 'img';
+    if (/^(mp4|m4v|mov|webm|mkv|avi|3gp)$/.test(e)) return 'vid';
+    if (/^(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/.test(e)) return 'aud';
+    return 'doc';
+  }
+  if (/video\.|\/video\//i.test(url)) return 'vid';
+  if (/music|audio/i.test(url)) return 'aud';
+  if (/pbs\.twimg|\/image|cover|avatar|thumb|photo/i.test(url)) return 'img';
+  return '?';
+}
+const KIND_ICON = { img: '🖼️', vid: '🎞️', aud: '🎵', doc: '📄', '?': '📦' };
+const MEDIA_HOST = /(twimg\.com|tiktokcdn|fbcdn\.net|cdninstagram|lookaside\.(facebook|instagram)|googlevideo|ytimg|redd\.it|imgur)/i;
+function looksMedia(url) { return !!extFromUrl(url) || MEDIA_HOST.test(url); }
+
+/* ── Seeded sampling (mulberry32 + partial Fisher–Yates) ────────────────── */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function sampleRows(pool, n, seed) {
+  const arr = pool.slice(), rnd = mulberry32(seed);
+  n = Math.min(n, arr.length);
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(rnd() * (arr.length - i));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, n).sort((a, b) => a - b);
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────── */
+function goStep(n) {
+  ['step-upload', 'step-config', 'step-run'].forEach((id, i) => $(id).classList.toggle('active', i === n - 1));
+  for (let i = 1; i <= 3; i++) {
+    $('s-dot-' + i).classList.toggle('active', i === n);
+    $('s-dot-' + i).classList.toggle('done', i < n);
+  }
+  $('s-line-1').classList.toggle('done', n > 1);
+  $('s-line-2').classList.toggle('done', n > 2);
+  window.scrollTo({ top: 0 });
+}
+
+/* ── Step 1: load CSV ───────────────────────────────────────────────────── */
+function loadFile(file) {
+  showBanner('error-upload', '');
+  if (!file) return;
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: 'greedy',
+    worker: false,
+    complete: res => {
+      const cols = (res.meta.fields || []);
+      if (!cols.length || !res.data.length) {
+        showBanner('error-upload', 'Não foi possível ler linhas nesse arquivo. Verifique se é um CSV com cabeçalho.');
+        return;
+      }
+      state.fileName = file.name;
+      state.rows = res.data;
+      state.columns = cols;
+      state.dirHandle = null;
+      analyzeColumns();
+      $('file-name').textContent = file.name;
+      $('file-meta').textContent = `${fmtInt(res.data.length)} linhas · ${cols.length} colunas`;
+      $('file-card').classList.add('visible');
+      const urlCols = cols.filter(c => state.colStats[c].cells > 0);
+      if (!urlCols.length) {
+        showBanner('error-upload', 'Nenhuma coluna desse CSV contém URLs começando com <code>http://</code> ou <code>https://</code>.');
+        $('btn-continue-1').disabled = true;
+        return;
+      }
+      $('btn-continue-1').disabled = false;
+      setupConfig();
+    },
+    error: err => showBanner('error-upload', 'Erro ao ler o CSV: ' + esc(err.message))
+  });
+}
+
+function analyzeColumns() {
+  const stats = {};
+  for (const c of state.columns) stats[c] = { cells: 0, media: 0 };
+  const probe = /https?:\/\//;
+  for (const r of state.rows) {
+    for (const c of state.columns) {
+      const v = r[c];
+      if (v && probe.test(v)) {
+        stats[c].cells++;
+        const us = extractUrls(v);
+        if (us.some(looksMedia)) stats[c].media++;
+      }
+    }
+  }
+  state.colStats = stats;
+}
+
+/* ── Step 2: configuration ──────────────────────────────────────────────── */
+function setupConfig() {
+  const cols = state.columns, st = state.colStats;
+  // Pre-select the column with most media-looking URLs (fallback: most URLs)
+  const urlCols = cols.filter(c => st[c].cells > 0);
+  const best = urlCols.slice().sort((a, b) => (st[b].media - st[a].media) || (st[b].cells - st[a].cells))[0];
+  state.selCols = best ? [best] : [];
+  state.idCol = suggestIdCol();
+  state.seed = Math.floor(Math.random() * 99999) + 1;
+  $('seed').value = state.seed;
+  $('subfolder').value = cleanName(`wgetlab_${csvStem()}_${todayStamp()}`);
+  $('zip-name').textContent = zipName();
+  renderColList();
+  renderIdSelect();
+  renderFolder();
+  recompute();
+}
+
+function suggestIdCol() {
+  const cols = state.columns.filter(c => c.trim() !== '');
+  const prefs = [/^id$/i, /^data\.id$/i, /^(tweet|post|video|item|status|media)_?id$/i, /(^|[._])id$/i];
+  for (const re of prefs) {
+    for (const c of cols) {
+      if (!re.test(c) || /(user|author|owner|music|channel)/i.test(c)) continue;
+      const vals = state.rows.map(r => r[c]).filter(v => !isEmptyCell(v));
+      if (vals.length > state.rows.length * 0.9 && new Set(vals).size >= vals.length * 0.95) return c;
+    }
+  }
+  return '';
+}
+
+function renderColList() {
+  const st = state.colStats;
+  const withUrl = state.columns.filter(c => st[c].cells > 0);
+  const without = state.columns.filter(c => st[c].cells === 0);
+  const row = c => {
+    const s = st[c], checked = state.selCols.includes(c) ? 'checked' : '';
+    const pill = s.cells
+      ? `<span class="pill ${s.media ? 'media' : 'url'}" title="${s.media ? fmtInt(s.media) + ' células com URL de mídia provável' : 'URLs sem extensão de mídia reconhecida'}">${fmtInt(s.cells)} com URL</span>`
+      : '<span class="pill">sem URL</span>';
+    const label = c.trim() === '' ? '<em>(sem nome)</em>' : esc(c);
+    return `<label class="check-row ${s.cells ? '' : 'nourl'}"><input type="checkbox" data-col="${esc(c)}" ${checked} ${s.cells ? '' : 'disabled'}><span class="check-label" title="${esc(c)}">${label}</span>${pill}</label>`;
+  };
+  let html = withUrl.map(row).join('');
+  if (without.length) html += `<div class="list-sep">Colunas sem URL (${without.length})</div>` + without.map(row).join('');
+  $('col-list').innerHTML = html;
+}
+
+function renderIdSelect() {
+  const opts = ['<option value="">Número da linha</option>']
+    .concat(state.columns.filter(c => c.trim() !== '').map(c => `<option value="${esc(c)}" ${c === state.idCol ? 'selected' : ''}>${esc(c)}</option>`));
+  $('id-col').innerHTML = opts.join('');
+}
+
+function zipName() { return cleanName($('subfolder').value) || cleanName(`wgetlab_${csvStem()}_${todayStamp()}`); }
+
+function renderFolder() {
+  $('folder-fs').style.display = HAS_FS ? '' : 'none';
+  $('folder-zip').style.display = HAS_FS ? 'none' : '';
+  $('zip-name').textContent = zipName() + '.zip';
+  const fn = $('folder-name'), fp = $('folder-path');
+  if (state.dirHandle) {
+    fn.textContent = '📁 ' + state.dirHandle.name;
+    fn.classList.add('set');
+    const sub = cleanName($('subfolder').value);
+    fp.textContent = '…/' + state.dirHandle.name + '/' + (sub ? sub + '/' : '');
+    fp.style.display = '';
+    $('pick-folder').textContent = '📁 Trocar pasta…';
+  } else {
+    fn.textContent = 'Nenhuma pasta escolhida';
+    fn.classList.remove('set');
+    fp.style.display = 'none';
+    $('pick-folder').textContent = '📁 Escolher pasta…';
+  }
+  updateStartBtn();
+}
+
+async function pickFolder() {
+  try {
+    state.dirHandle = await window.showDirectoryPicker({ id: 'wgetlab', mode: 'readwrite', startIn: 'downloads' });
+  } catch (e) {
+    if (e.name !== 'AbortError') showBanner('error-config', 'Não foi possível acessar a pasta: ' + esc(e.message));
+  }
+  renderFolder();
+}
+
+/* Build URL lists, eligible rows, sample and tasks from current settings */
+function recompute() {
+  const cols = state.columns.filter(c => state.selCols.includes(c));
+  state.selCols = cols;
+  state.rowUrls = state.rows.map(r => {
+    const o = {}; let any = false;
+    for (const c of cols) { const u = extractUrls(r[c]); o[c] = u; if (u.length) any = true; }
+    o.__any = any;
+    return o;
+  });
+  state.eligible = [];
+  state.rowUrls.forEach((o, i) => { if (o.__any) state.eligible.push(i + 1); });
+
+  state.mode = document.querySelector('input[name=mode]:checked').value;
+  state.sampleN = Math.max(1, parseInt($('sample-n').value, 10) || 1);
+  state.seed = parseInt($('seed').value, 10) || 1;
+  $('sample-opts').classList.toggle('disabled', state.mode !== 'sample');
+  $('sample-n').max = state.eligible.length || 1;
+
+  state.selectedRows = state.mode === 'sample'
+    ? sampleRows(state.eligible, state.sampleN, state.seed)
+    : state.eligible.slice();
+
+  // Tasks
+  const multiCol = cols.length > 1, taken = new Set(), tasks = [];
+  for (const row of state.selectedRows) {
+    const r = state.rows[row - 1], o = state.rowUrls[row - 1];
+    const rawId = state.idCol ? r[state.idCol] : '';
+    const id = isEmptyCell(rawId) ? String(row) : String(rawId).trim();
+    for (const c of cols) {
+      const urls = o[c], n = urls.length;
+      urls.forEach((url, i) => {
+        let base = cleanName(id) + (multiCol ? '_' + cleanName(c) : '') + (n > 1 ? '_' + (i + 1) : '');
+        if (!base) base = String(row);
+        if (taken.has(base)) base += '_r' + row;
+        taken.add(base);
+        tasks.push({ row, id, col: c, k: i + 1, n, url, base });
+      });
+    }
+  }
+  state.tasks = tasks;
+  renderSummary();
+  renderR();
+}
+
+function renderSummary() {
+  $('st-rows').textContent = fmtInt(state.rows.length);
+  $('st-eligible').textContent = fmtInt(state.eligible.length);
+  $('eligible-pill').textContent = fmtInt(state.eligible.length);
+  $('st-selrows').textContent = fmtInt(state.selectedRows.length);
+  $('st-files').textContent = fmtInt(state.tasks.length);
+
+  const first = state.tasks.slice(0, 8);
+  $('preview-body').innerHTML = first.length
+    ? first.map(t => {
+        const ext = extFromUrl(t.url);
+        return `<tr><td>${t.row}</td><td class="name-cell">${KIND_ICON[guessKind(t.url)]} ${esc(t.base)}.${ext || '<span style="color:var(--ink-muted)">?</span>'}</td><td class="url-cell"><a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">${esc(t.url.length > 110 ? t.url.slice(0, 110) + '…' : t.url)}</a></td></tr>`;
+      }).join('')
+    : '<tr><td colspan="3" style="color:var(--ink-muted);padding:1rem">Selecione ao menos uma coluna com URLs.</td></tr>';
+
+  const kinds = {};
+  state.tasks.forEach(t => { const k = guessKind(t.url); kinds[k] = (kinds[k] || 0) + 1; });
+  const lbl = { img: 'imagens', vid: 'vídeos', aud: 'áudios', doc: 'documentos', '?': 'tipo a detectar' };
+  $('type-summary').textContent = Object.entries(kinds).map(([k, v]) => `${KIND_ICON[k]} ${fmtInt(v)} ${lbl[k]}`).join(' · ');
+
+  const ex = state.tasks[0];
+  $('name-example').textContent = ex ? `${ex.base}.${extFromUrl(ex.url) || '<ext>'}` : '—';
+
+  // Host warnings
+  const meta = state.tasks.filter(t => /lookaside\.(facebook|instagram)\.com/i.test(t.url)).length;
+  const signed = state.tasks.filter(t => /[?&](x-expires|expire|oe)=/i.test(t.url)).length;
+  const warns = [];
+  if (meta) warns.push(`<strong>${fmtInt(meta)} URLs da Meta Content Library</strong> (<code>lookaside.facebook.com</code>). Esses links só funcionam com login no ambiente da Meta Content Library: fora dele, o servidor responde "não autorizado" e o download falha, tanto aqui quanto no <code>wget</code>.`);
+  if (signed) warns.push(`<strong>${fmtInt(signed)} URLs assinadas com prazo de validade</strong> (parâmetros como <code>x-expires</code>/<code>expire</code>). Se a coleta for antiga, esses links podem já ter expirado.`);
+  showBanner('host-warn', warns.join('<br>'));
+  updateStartBtn();
+}
+
+function updateStartBtn() {
+  let hint = '';
+  if (!state.tasks.length) hint = 'Nada a baixar com a configuração atual.';
+  else if (HAS_FS && !state.dirHandle) hint = 'Escolha a pasta de destino.';
+  $('btn-start').disabled = !!hint;
+  $('start-hint').textContent = hint;
+}
+
+/* ── R script generation ────────────────────────────────────────────────── */
+function rStr(s) { return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'; }
+function rVec(xs) { return 'c(' + xs.map(rStr).join(', ') + ')'; }
+function rIntVec(xs) {
+  // wrap long vectors at ~100 chars
+  const parts = []; let line = '';
+  xs.forEach((x, i) => {
+    const s = String(x) + (i < xs.length - 1 ? ', ' : '');
+    if ((line + s).length > 96) { parts.push(line.trimEnd()); line = ''; }
+    line += s;
+  });
+  if (line) parts.push(line);
+  return 'c(\n  ' + parts.join('\n  ') + '\n)';
+}
+
+function buildR() {
+  const cols = state.selCols;
+  const sub = cleanName($('subfolder').value);
+  const folder = HAS_FS && state.dirHandle && state.dirHandle.name
+    ? `~/Downloads/${state.dirHandle.name}${sub ? '/' + sub : ''}/`
+    : `~/Downloads/${sub || 'wgetlab_downloads'}/`;
+  const sampling = state.mode === 'sample';
+  const L = [];
+  L.push(`# ─────────────────────────────────────────────────────────────────────`);
+  L.push(`# WgetLAB — script gerado em ${new Date().toLocaleString('pt-BR')}`);
+  L.push(`# Baixa as URLs da(s) coluna(s) ${cols.map(c => '"' + c + '"').join(', ')} de "${state.fileName}"`);
+  L.push(`# ${sampling ? `Amostra aleatória de ${state.selectedRows.length} linhas (semente ${state.seed})` : `Todas as ${state.eligible.length} linhas com URL`} · ${state.tasks.length} arquivos`);
+  L.push(`# Requer: pacotes tidyverse e wget instalado no sistema`);
+  L.push(`#   macOS: brew install wget · Linux: apt install wget · Windows: winget install GNU.Wget2`);
+  L.push(`# ─────────────────────────────────────────────────────────────────────`);
+  L.push('');
+  L.push('library(tidyverse)');
+  L.push('');
+  L.push('# Ajuste os caminhos se necessário');
+  L.push(`arquivo_csv     <- ${rStr('~/Downloads/' + state.fileName)}`);
+  L.push(`download_folder <- ${rStr(folder)}`);
+  L.push(`colunas_url     <- ${rVec(cols)}`);
+  L.push(`coluna_id       <- ${state.idCol ? rStr(state.idCol) : 'NA  # sem coluna de ID: usa o número da linha'}`);
+  L.push('');
+  L.push('# Lê tudo como texto (evita perder dígitos de IDs longos)');
+  L.push('df <- read_csv(arquivo_csv, col_types = cols(.default = col_character()),');
+  L.push('               na = c("", "NA", "N/A", "NULL", "null", "NaN")) %>%');
+  L.push('  mutate(.linha = row_number())');
+  L.push('');
+  L.push('# Extrai URLs de qualquer formato de célula: uma URL, várias separadas');
+  L.push('# por | ; , ou espaço, ou JSON (ex.: coluna multimedia da Meta)');
+  L.push('extrair_urls <- function(x) {');
+  L.push('  if (is.na(x) || x == "") return(character(0))');
+  L.push('  x <- str_replace_all(x, fixed("\\\\/"), "/")');
+  L.push('  u <- str_extract_all(x, "https?://[^\\\\s|\\"\'<>\\\\[\\\\]{}\\\\\\\\]+")[[1]]');
+  L.push('  u <- unlist(str_split(u, ",(?=https?://)"))');
+  L.push('  u <- str_remove(u, "[,;.)]+$")');
+  L.push('  unique(u[u != ""])');
+  L.push('}');
+  L.push('');
+  L.push('limpar_nome <- function(s) {');
+  L.push('  s <- str_replace_all(s, "[^\\\\p{L}\\\\p{N}._-]+", "_")');
+  L.push('  str_sub(str_remove_all(s, "^_+|_+$"), 1, 80)');
+  L.push('}');
+  L.push('');
+  L.push('# Uma linha por URL');
+  L.push('tarefas <- df %>%');
+  L.push('  mutate(.id = if (is.na(coluna_id)) NA_character_ else .data[[coluna_id]],');
+  L.push('         .id = coalesce(str_trim(.id), as.character(.linha))) %>%');
+  L.push('  select(.linha, .id, all_of(colunas_url)) %>%');
+  L.push('  pivot_longer(all_of(colunas_url), names_to = ".coluna", values_to = ".celula") %>%');
+  L.push('  mutate(.url = map(.celula, extrair_urls), .n = lengths(.url)) %>%');
+  L.push('  filter(.n > 0)');
+  L.push('');
+  if (sampling) {
+    L.push(`# Amostra: as mesmas ${state.selectedRows.length} linhas sorteadas no WgetLAB (semente ${state.seed})`);
+    L.push(`linhas <- ${rIntVec(state.selectedRows)}`);
+    L.push('tarefas <- tarefas %>% filter(.linha %in% linhas)');
+    L.push('# Para sortear uma nova amostra direto no R (as linhas NÃO serão as mesmas do app):');
+    L.push(`# set.seed(${state.seed}); linhas <- sample(unique(tarefas$.linha), ${state.selectedRows.length}); tarefas <- tarefas %>% filter(.linha %in% linhas)`);
+    L.push('');
+  }
+  L.push('tarefas <- tarefas %>%');
+  L.push('  unnest_longer(.url, indices_to = ".k") %>%');
+  L.push('  mutate(.base = str_c(limpar_nome(.id),');
+  L.push(`                       ${cols.length > 1 ? 'str_c("_", limpar_nome(.coluna))' : '""'},`);
+  L.push('                       if_else(.n > 1, str_c("_", .k), "")),');
+  L.push('         .base = if_else(.base == "", as.character(.linha), .base),');
+  L.push('         .base = if_else(duplicated(.base), str_c(.base, "_r", .linha), .base))');
+  L.push('');
+  L.push('# Extensão: pela URL (.jpg, ?format=png, mime_type=video_mp4) ou pelos bytes do arquivo');
+  L.push('ext_ok <- "^(jpe?g|png|gif|webp|avif|bmp|tiff?|heic|svg|mp4|m4v|mov|webm|mkv|avi|3gp|mp3|m4a|aac|wav|ogg|oga|opus|flac|pdf)$"');
+  L.push('norm_ext <- function(e) {');
+  L.push('  e <- tolower(e)');
+  L.push('  e <- recode(e, jpeg = "jpg", tif = "tiff", mpeg = "mp3", quicktime = "mov", `x-m4a` = "m4a")');
+  L.push('  if (!is.na(e) && str_detect(e, ext_ok)) e else NA_character_');
+  L.push('}');
+  L.push('ext_da_url <- function(u) {');
+  L.push('  caminho <- str_remove(str_remove(u, "^https?://[^/]+"), "[?#].*$")');
+  L.push('  e <- norm_ext(str_match(caminho, "\\\\.([A-Za-z0-9]{2,5})$")[, 2])');
+  L.push('  if (!is.na(e)) return(e)');
+  L.push('  q <- str_match(u, "[?&](?:format|mime_type|ext)=([^&#]+)")[, 2]');
+  L.push('  if (!is.na(q)) return(norm_ext(tail(str_split(URLdecode(q), "[_/]")[[1]], 1)))');
+  L.push('  NA_character_');
+  L.push('}');
+  L.push('sniff_ext <- function(path) {');
+  L.push('  b <- readBin(path, "raw", 16)');
+  L.push('  if (length(b) < 4) return("bin")');
+  L.push('  s <- function(i, n) rawToChar(b[i:(i + n - 1)][b[i:(i + n - 1)] != as.raw(0)])');
+  L.push('  h <- function(...) all(b[seq_along(c(...))] == as.raw(c(...)))');
+  L.push('  if (h(0xFF, 0xD8, 0xFF)) return("jpg")');
+  L.push('  if (h(0x89, 0x50, 0x4E, 0x47)) return("png")');
+  L.push('  if (s(1, 4) == "GIF8") return("gif")');
+  L.push('  if (s(1, 4) == "RIFF" && length(b) >= 12) {');
+  L.push('    t <- s(9, 4)');
+  L.push('    if (t == "WEBP") return("webp"); if (t == "WAVE") return("wav"); if (t == "AVI ") return("avi")');
+  L.push('  }');
+  L.push('  if (length(b) >= 12 && s(5, 4) == "ftyp") {');
+  L.push('    brand <- rawToChar(b[9:12])');
+  L.push('    if (str_starts(brand, "M4A|M4B")) return("m4a")');
+  L.push('    if (brand == "qt  ") return("mov")');
+  L.push('    if (brand == "avif") return("avif")');
+  L.push('    if (brand %in% c("heic", "heix", "mif1")) return("heic")');
+  L.push('    return("mp4")');
+  L.push('  }');
+  L.push('  if (h(0x1A, 0x45, 0xDF, 0xA3)) return("webm")');
+  L.push('  if (s(1, 3) == "ID3" || (b[1] == as.raw(0xFF) && (as.integer(b[2]) %/% 32) == 7)) return("mp3")');
+  L.push('  if (s(1, 4) == "OggS") return("ogg")');
+  L.push('  if (s(1, 4) == "fLaC") return("flac")');
+  L.push('  if (s(1, 4) == "%PDF") return("pdf")');
+  L.push('  if (s(1, 1) == "<") return("html")');
+  L.push('  "bin"');
+  L.push('}');
+  L.push('');
+  L.push('# Cria a pasta, se não existir');
+  L.push('download_folder <- path.expand(download_folder)');
+  L.push('dir.create(download_folder, recursive = TRUE, showWarnings = FALSE)');
+  L.push('existentes <- tools::file_path_sans_ext(list.files(download_folder))');
+  L.push('');
+  L.push('# Baixa cada URL com wget');
+  L.push('tarefas$arquivo <- NA_character_');
+  L.push('tarefas$status  <- NA_character_');
+  L.push('for (i in seq_len(nrow(tarefas))) {');
+  L.push('  url  <- tarefas$.url[i]');
+  L.push('  base <- tarefas$.base[i]');
+  if ($('skip-existing').checked) {
+    L.push('  if (base %in% existentes) { tarefas$status[i] <- "já existia"; next }');
+  }
+  L.push('  tmp <- file.path(download_folder, paste0(base, ".part"))');
+  L.push('  wget_command <- paste("wget -q --tries=2 --timeout=60", shQuote(url), "-O", shQuote(tmp))');
+  L.push('  ok <- system(wget_command) == 0');
+  L.push('  # Alternativa sem wget: ok <- !inherits(try(download.file(url, tmp, mode = "wb", quiet = TRUE)), "try-error")');
+  L.push('  if (!ok || !file.exists(tmp) || file.size(tmp) == 0) {');
+  L.push('    unlink(tmp); tarefas$status[i] <- "falhou"; next');
+  L.push('  }');
+  L.push('  ext <- ext_da_url(url)');
+  L.push('  if (is.na(ext)) ext <- sniff_ext(tmp)');
+  L.push('  destino <- file.path(download_folder, paste0(base, ".", ext))');
+  L.push('  file.rename(tmp, destino)');
+  L.push('  tarefas$arquivo[i] <- basename(destino)');
+  L.push('  tarefas$status[i]  <- "ok"');
+  L.push('  cat(sprintf("[%d/%d] %s\\n", i, nrow(tarefas), basename(destino)))');
+  L.push('}');
+  L.push('');
+  L.push('# Manifesto e confirmação');
+  L.push('tarefas %>%');
+  L.push('  transmute(linha = .linha, id = .id, coluna = .coluna, url = .url, arquivo, status) %>%');
+  L.push(`  write_csv(file.path(download_folder, paste0("wgetlab_manifest_r_", format(Sys.time(), "%Y%m%d-%H%M%S"), ".csv")))`);
+  L.push('print(count(tarefas, status))');
+  L.push('cat("Download complete. Files saved to:", download_folder, "\\n")');
+  return L.join('\n');
+}
+
+function renderR() {
+  const code = buildR();
+  state.rCode = code;
+  const hl = esc(code).split('\n').map(l => /^\s*#/.test(l) ? `<span class="c">${l}</span>` : l).join('\n');
+  document.querySelectorAll('pre[data-r="code"]').forEach(p => p.innerHTML = hl);
+}
+function rAction(kind, btn) {
+  if (kind === 'copy') {
+    navigator.clipboard.writeText(state.rCode).then(() => {
+      const t = btn.textContent; btn.textContent = '✓ Copiado'; setTimeout(() => btn.textContent = t, 1400);
+    });
+  } else {
+    downloadBlob(new Blob([state.rCode], { type: 'text/plain;charset=utf-8' }), `wgetlab_${cleanName(csvStem())}.R`);
+  }
+}
+
+/* ── Step 3: download engine ────────────────────────────────────────────── */
+/* Sinks: FS (File System Access API, streams to disk) or ZIP (in memory). */
+async function makeFsSink(root, sub) {
+  let perm = await root.queryPermission({ mode: 'readwrite' });
+  if (perm !== 'granted') perm = await root.requestPermission({ mode: 'readwrite' });
+  if (perm !== 'granted') throw new Error('Permissão de escrita negada para a pasta escolhida.');
+  const dir = sub ? await root.getDirectoryHandle(sub, { create: true }) : root;
+  const existing = new Set();
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind === 'file' && !name.endsWith('.crswap')) existing.add(name.replace(/\.[^.]+$/, ''));
+  }
+  return {
+    label: '…/' + root.name + (sub ? '/' + sub : ''),
+    existing,
+    async create(name) {
+      const fh = await dir.getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      return {
+        write: chunk => w.write(chunk),
+        close: () => w.close(),
+        abort: async () => { try { await w.abort(); } catch {} try { await dir.removeEntry(name); } catch {} }
+      };
+    },
+    async writeText(name, text) {
+      const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+      await w.write(text); await w.close();
+    },
+    async finish() {}
+  };
+}
+function makeZipSink(name) {
+  const zip = new JSZip(), folder = zip.folder(name);
+  return {
+    label: name + '.zip',
+    existing: new Set(),
+    async create(fname) {
+      const parts = [];
+      return {
+        write: async chunk => { parts.push(chunk); },
+        close: async () => { folder.file(fname, new Blob(parts)); },
+        abort: async () => {}
+      };
+    },
+    async writeText(fname, text) { folder.file(fname, text); },
+    async finish(onStatus) {
+      onStatus('Compactando ZIP…');
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      downloadBlob(blob, name + '.zip');
+    }
+  };
+}
+
+function uniqueName(run, base, ext) {
+  let name = `${base}.${ext}`, i = 2;
+  while (run.usedNames.has(name)) name = `${base}_${i++}.${ext}`;
+  run.usedNames.add(name);
+  return name;
+}
+
+function explainError(e, url) {
+  if (e.name === 'AbortError') return 'cancelado';
+  if (e.status) {
+    const s = e.status;
+    const why = s === 401 || s === 403 ? ' — acesso negado (exige login ou o link expirou)'
+      : s === 404 || s === 410 ? ' — arquivo não encontrado (removido ou link expirado)'
+      : s === 429 ? ' — muitas requisições; tente com menos downloads simultâneos'
+      : s >= 500 ? ' — erro no servidor' : '';
+    return `HTTP ${s}${why}`;
+  }
+  if (e instanceof TypeError) {
+    if (/lookaside\.(facebook|instagram)|fbcdn/i.test(url)) return 'bloqueado: links da Meta Content Library exigem sessão autenticada';
+    return 'bloqueado pelo servidor (CORS) ou falha de rede';
+  }
+  return e.message || String(e);
+}
+
+async function fetchOne(run, t) {
+  const res = await fetch(t.url, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', signal: run.ctrl.signal });
+  if (!res.ok) { const err = new Error('HTTP ' + res.status); err.status = res.status; throw err; }
+  const reader = res.body.getReader();
+  // Read until we have enough bytes to sniff the type
+  const head = []; let headLen = 0, done = false;
+  while (headLen < 16) {
+    const r = await reader.read();
+    if (r.done) { done = true; break; }
+    head.push(r.value); headLen += r.value.length;
+  }
+  if (!headLen) throw new Error('resposta vazia');
+  const first = new Uint8Array(headLen); let off = 0;
+  for (const c of head) { first.set(c, off); off += c.length; }
+  const ct = res.headers.get('content-type') || '';
+  let ext = extFromUrl(t.url) || sniffExt(first) || extFromContentType(ct) || 'bin';
+  if (ext === 'html' && !extFromUrl(t.url)) {
+    // A web page instead of media: usually a login wall or player page
+    reader.cancel().catch(() => {});
+    throw new Error('o link aponta para uma página HTML, não para um arquivo de mídia');
+  }
+  const name = uniqueName(run, t.base, ext);
+  const w = await run.sink.create(name);
+  let bytes = 0;
+  try {
+    await w.write(first); bytes += first.length; run.bytes += first.length;
+    while (!done) {
+      const r = await reader.read();
+      if (r.done) break;
+      await w.write(r.value); bytes += r.value.length;
+      run.bytes += r.value.length;
+    }
+    await w.close();
+  } catch (e) {
+    run.bytes -= bytes;
+    await w.abort();
+    run.usedNames.delete(name);
+    throw e;
+  }
+  return { name, bytes };
+}
+
+async function processTask(run, t) {
+  const rec = { row: t.row, id: t.id, col: t.col, url: t.url, file: '', status: '', bytes: 0, error: '' };
+  if (run.skipExisting && run.sink.existing.has(t.base)) {
+    rec.status = 'skip'; rec.file = t.base + '.*'; rec.error = 'já existia na pasta';
+    return rec;
+  }
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { name, bytes } = await fetchOne(run, t);
+      rec.status = 'ok'; rec.file = name; rec.bytes = bytes; rec.error = '';
+      return rec;
+    } catch (e) {
+      rec.status = 'fail'; rec.error = explainError(e, t.url);
+      if (e.name === 'AbortError') return rec;
+      const retryable = (e instanceof TypeError) || (e.status && (e.status >= 500 || e.status === 429));
+      if (!retryable || attempt === 2) return rec;
+      await new Promise(r => setTimeout(r, e.status === 429 ? 3000 : 800));
+    }
+  }
+  return rec;
+}
+
+async function startRun(taskList) {
+  showBanner('error-config', '');
+  const tasks = taskList || state.tasks;
+  if (!tasks.length) return;
+  const sub = cleanName($('subfolder').value);
+  let sink;
+  try {
+    sink = HAS_FS ? await makeFsSink(state.dirHandle, sub) : makeZipSink(zipName());
+  } catch (e) {
+    showBanner('error-config', esc(e.message));
+    goStep(2);
+    return;
+  }
+  const run = state.run = {
+    tasks, sink, idx: 0, done: 0, ok: 0, fail: 0, skip: 0, bytes: 0,
+    log: [], usedNames: new Set(), paused: false, cancelled: false, finished: false,
+    pauseGate: null, unpause: null, ctrl: new AbortController(),
+    skipExisting: $('skip-existing').checked,
+    concurrency: Math.min(8, Math.max(1, parseInt($('concurrency').value, 10) || 4)),
+    startedAt: Date.now()
+  };
+  goStep(3);
+  $('run-title').textContent = 'Baixando arquivos';
+  $('run-desc').innerHTML = `${fmtInt(tasks.length)} arquivos de <strong>${esc(state.fileName)}</strong> → <code class="name-cell">${esc(sink.label)}</code>`;
+  $('btn-pause').disabled = false; $('btn-cancel').disabled = false;
+  $('btn-pause').textContent = '⏸ Pausar';
+  ['btn-manifest', 'btn-failures', 'btn-retry'].forEach(id => $(id).disabled = true);
+  $('btn-back-2').disabled = true; $('btn-new').disabled = true;
+  showBanner('fail-hint', '');
+  renderRun();
+
+  const tick = setInterval(renderRun, 300);
+  const worker = async () => {
+    while (!run.cancelled) {
+      if (run.paused) { await run.pauseGate; continue; }
+      const i = run.idx++;
+      if (i >= tasks.length) return;
+      const rec = await processTask(run, tasks[i]);
+      if (run.cancelled && rec.error === 'cancelado') return;
+      run.log.push(rec); run.done++;
+      run[rec.status]++;
+    }
+  };
+  await Promise.all(Array.from({ length: run.concurrency }, worker));
+  clearInterval(tick);
+  run.finished = true;
+
+  if ($('write-manifest').checked && run.log.length) {
+    try { await sink.writeText(`wgetlab_manifest_${todayStamp(true)}.csv`, manifestCsv(run.log)); } catch {}
+  }
+  try { await sink.finish(msg => $('run-status').textContent = msg); } catch (e) {
+    showBanner('fail-hint', 'Erro ao gerar o ZIP: ' + esc(e.message));
+  }
+  renderRun();
+}
+
+function manifestCsv(log) {
+  return Papa.unparse(log.map(r => ({
+    linha: r.row, id: r.id, coluna: r.col, url: r.url, arquivo: r.file,
+    status: { ok: 'ok', fail: 'falhou', skip: 'já existia' }[r.status], bytes: r.bytes, erro: r.error
+  })));
+}
+
+let logFilter = 'all';
+function renderRun() {
+  const run = state.run; if (!run) return;
+  const total = run.tasks.length;
+  const pct = total ? (run.done / total) * 100 : 0;
+  $('prog-bar').style.width = pct.toFixed(1) + '%';
+  $('prog-text').textContent = `${fmtInt(run.done)} / ${fmtInt(total)} (${pct.toFixed(0)}%)`;
+  $('rs-ok').textContent = fmtInt(run.ok);
+  $('rs-fail').textContent = fmtInt(run.fail);
+  $('rs-skip').textContent = fmtInt(run.skip);
+  $('rs-bytes').textContent = fmtBytes(run.bytes);
+
+  let status;
+  if (run.finished) {
+    const secs = Math.round((Date.now() - run.startedAt) / 1000);
+    status = (run.cancelled ? 'Cancelado' : 'Concluído') + ` em ${secs < 60 ? secs + ' s' : Math.floor(secs / 60) + ' min ' + (secs % 60) + ' s'}`;
+    $('run-title').textContent = run.cancelled ? 'Download cancelado' : 'Download concluído';
+    $('btn-pause').disabled = true; $('btn-cancel').disabled = true;
+    $('btn-manifest').disabled = !run.log.length;
+    $('btn-failures').disabled = !run.fail;
+    $('btn-retry').disabled = !run.fail;
+    $('btn-back-2').disabled = false; $('btn-new').disabled = false;
+    if (run.fail) {
+      const counts = {};
+      run.log.filter(r => r.status === 'fail').forEach(r => counts[r.error] = (counts[r.error] || 0) + 1);
+      const lines = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 4)
+        .map(([e, n]) => `• ${fmtInt(n)}× ${esc(e)}`).join('<br>');
+      showBanner('fail-hint', `<strong>${fmtInt(run.fail)} arquivos não puderam ser baixados.</strong><br>${lines}`);
+    }
+  } else {
+    status = run.paused ? 'Pausado' : run.cancelled ? 'Cancelando…' : `Baixando (${run.concurrency} por vez)…`;
+  }
+  $('run-status').textContent = status;
+
+  const rows = run.log.filter(r => logFilter === 'all' || r.status === logFilter);
+  const last = rows.slice(-300).reverse();
+  $('log-body').innerHTML = last.map(r => {
+    const lbl = { ok: 'OK', fail: 'FALHOU', skip: 'EXISTE' }[r.status];
+    const detail = r.status === 'ok' ? fmtBytes(r.bytes)
+      : `<div class="${r.status === 'fail' ? 'err-cell' : ''}">${esc(r.error)}</div><div class="url-cell">${esc(r.url.length > 90 ? r.url.slice(0, 90) + '…' : r.url)}</div>`;
+    return `<tr><td><span class="status ${r.status}">${lbl}</span></td><td class="name-cell">${esc(r.file || '—')}</td><td>${detail}</td></tr>`;
+  }).join('') || '<tr><td colspan="3" style="color:var(--ink-muted);padding:1rem">Nenhum registro ainda.</td></tr>';
+}
+
+function togglePause() {
+  const run = state.run; if (!run || run.finished) return;
+  run.paused = !run.paused;
+  $('btn-pause').textContent = run.paused ? '▶ Continuar' : '⏸ Pausar';
+  if (run.paused) run.pauseGate = new Promise(r => run.unpause = r);
+  else run.unpause();   // wakes every waiting worker
+  renderRun();
+}
+function cancelRun() {
+  const run = state.run; if (!run || run.finished) return;
+  run.cancelled = true;
+  run.ctrl.abort();
+  if (run.paused) { run.paused = false; run.unpause(); }
+  renderRun();
+}
+
+/* ── Theme toggle ───────────────────────────────────────────────────────── */
+function initTheme() {
+  const btn = $('theme-btn');
+  const apply = theme => { document.documentElement.dataset.theme = theme; btn.textContent = theme === 'dark' ? '☀️' : '🌙'; };
+  let stored = null;
+  try { stored = localStorage.getItem('wl-theme'); } catch {}
+  apply(stored || (window.matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('wl-theme', next); } catch {}
+    apply(next);
+  });
+}
+
+/* ── Event wiring ───────────────────────────────────────────────────────── */
+function init() {
+  initTheme();
+
+  if (!HAS_FS) {
+    showBanner('browser-warn', 'Este navegador não permite gravar arquivos direto numa pasta escolhida. O WgetLAB vai funcionar em <strong>modo ZIP</strong>: os arquivos serão reunidos num ZIP salvo em Downloads. Para escolher a pasta, use <strong>Chrome, Edge ou Opera</strong> no computador.');
+  }
+
+  const dz = $('dropzone'), fi = $('file-input');
+  dz.addEventListener('click', () => fi.click());
+  dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } });
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); loadFile(e.dataTransfer.files[0]); });
+  fi.addEventListener('change', () => { loadFile(fi.files[0]); fi.value = ''; });
+  $('file-remove').addEventListener('click', () => {
+    state.rows = []; state.fileName = '';
+    $('file-card').classList.remove('visible');
+    $('btn-continue-1').disabled = true;
+  });
+  $('btn-continue-1').addEventListener('click', () => goStep(2));
+
+  // Config
+  $('col-list').addEventListener('change', e => {
+    const c = e.target.dataset.col; if (c === undefined) return;
+    state.selCols = e.target.checked ? state.selCols.concat(c) : state.selCols.filter(x => x !== c);
+    recompute();
+  });
+  $('cols-none').addEventListener('click', () => { state.selCols = []; renderColList(); recompute(); });
+  document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', recompute));
+  ['sample-n', 'seed'].forEach(id => $(id).addEventListener('input', recompute));
+  $('reroll').addEventListener('click', () => { $('seed').value = Math.floor(Math.random() * 99999) + 1; recompute(); });
+  $('id-col').addEventListener('change', e => { state.idCol = e.target.value; recompute(); });
+  $('subfolder').addEventListener('input', () => { renderFolder(); renderR(); });
+  $('skip-existing').addEventListener('change', renderR);
+  $('pick-folder').addEventListener('click', pickFolder);
+  $('btn-back-1').addEventListener('click', () => goStep(1));
+  $('btn-start').addEventListener('click', () => startRun());
+
+  // R boxes
+  document.querySelectorAll('.rbox button[data-r]').forEach(b => b.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation(); rAction(b.dataset.r, b);
+  }));
+
+  // Run
+  $('btn-pause').addEventListener('click', togglePause);
+  $('btn-cancel').addEventListener('click', cancelRun);
+  $('btn-manifest').addEventListener('click', () => downloadBlob(new Blob([manifestCsv(state.run.log)], { type: 'text/csv' }), `wgetlab_manifest_${todayStamp(true)}.csv`));
+  $('btn-failures').addEventListener('click', () => downloadBlob(new Blob([manifestCsv(state.run.log.filter(r => r.status === 'fail'))], { type: 'text/csv' }), `wgetlab_falhas_${todayStamp(true)}.csv`));
+  $('btn-retry').addEventListener('click', () => {
+    const failedUrls = new Set(state.run.log.filter(r => r.status === 'fail').map(r => r.url + '\u0000' + r.row));
+    startRun(state.tasks.filter(t => failedUrls.has(t.url + '\u0000' + t.row)));
+  });
+  document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
+    logFilter = b.dataset.filter; renderRun();
+  }));
+  $('btn-back-2').addEventListener('click', () => goStep(2));
+  $('btn-new').addEventListener('click', () => { $('file-card').classList.remove('visible'); $('btn-continue-1').disabled = true; state.run = null; goStep(1); });
+
+  window.addEventListener('beforeunload', e => {
+    if (state.run && !state.run.finished) { e.preventDefault(); e.returnValue = ''; }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
