@@ -4,7 +4,7 @@ Ferramenta web para **baixar em lote imagens, áudios e vídeos listados num CSV
 
 Inspirado no fluxo `wget` em R muito usado em pesquisas com dados de plataformas digitais. O app também **gera o script R equivalente**, para reproduzir a mesma operação no RStudio.
 
-**[▶ Abrir o app](https://SEU-USUARIO.github.io/wgetlab/)**
+**[▶ Abrir o app](https://wgetlab.colab.meme/)**
 
 ---
 
