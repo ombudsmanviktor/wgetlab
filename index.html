@@ -421,7 +421,7 @@
             <div class="inline"><input type="number" class="input num" id="concurrency" min="1" max="8" value="4"><span style="font-size:.8rem;color:var(--ink-muted)">de 1 a 8</span></div>
           </div>
           <label class="radio-row"><input type="checkbox" id="skip-existing" checked> Pular arquivos que já existem na pasta (permite retomar um download interrompido)</label>
-          <label class="radio-row"><input type="checkbox" id="write-manifest" checked> Gravar <code>wgetlab_manifest_….csv</code> na pasta ao final (linha, id, URL, arquivo, status)</label>
+          <label class="radio-row"><input type="checkbox" id="write-manifest" checked> Gravar <code>wgetlab_manifest_….csv</code> na pasta ao final: uma linha por arquivo, com nome, status e URL, seguidos de todas as colunas originais do CSV</label>
         </details>
       </div>
     </div>
@@ -1060,7 +1060,8 @@ function buildR() {
   L.push('# Cria a pasta, se não existir');
   L.push('download_folder <- path.expand(download_folder)');
   L.push('dir.create(download_folder, recursive = TRUE, showWarnings = FALSE)');
-  L.push('existentes <- tools::file_path_sans_ext(list.files(download_folder))');
+  L.push('arquivos_existentes <- list.files(download_folder)');
+  L.push('existentes <- tools::file_path_sans_ext(arquivos_existentes)');
   L.push('');
   L.push('# Baixa cada URL com wget');
   L.push('tarefas$arquivo <- NA_character_');
@@ -1069,7 +1070,10 @@ function buildR() {
   L.push('  url  <- tarefas$.url[i]');
   L.push('  base <- tarefas$.base[i]');
   if ($('skip-existing').checked) {
-    L.push('  if (base %in% existentes) { tarefas$status[i] <- "já existia"; next }');
+    L.push('  if (base %in% existentes) {');
+    L.push('    tarefas$arquivo[i] <- arquivos_existentes[match(base, existentes)]');
+    L.push('    tarefas$status[i]  <- "já existia"; next');
+    L.push('  }');
   }
   L.push('  tmp <- file.path(download_folder, paste0(base, ".part"))');
   L.push('  wget_command <- paste("wget -q --tries=2 --timeout=60", shQuote(url), "-O", shQuote(tmp))');
@@ -1087,10 +1091,12 @@ function buildR() {
   L.push('  cat(sprintf("[%d/%d] %s\\n", i, nrow(tarefas), basename(destino)))');
   L.push('}');
   L.push('');
-  L.push('# Manifesto e confirmação');
+  L.push('# Manifesto: uma linha por arquivo + todas as colunas originais do CSV');
   L.push('tarefas %>%');
-  L.push('  transmute(linha = .linha, id = .id, coluna = .coluna, url = .url, arquivo, status) %>%');
-  L.push(`  write_csv(file.path(download_folder, paste0("wgetlab_manifest_r_", format(Sys.time(), "%Y%m%d-%H%M%S"), ".csv")))`);
+  L.push('  transmute(wgetlab_linha = .linha, wgetlab_arquivo = arquivo, wgetlab_status = status,');
+  L.push('            wgetlab_coluna_url = .coluna, wgetlab_url = .url) %>%');
+  L.push('  left_join(df, by = c(wgetlab_linha = ".linha")) %>%');
+  L.push(`  write_excel_csv(file.path(download_folder, paste0("wgetlab_manifest_r_", format(Sys.time(), "%Y%m%d-%H%M%S"), ".csv")))`);
   L.push('print(count(tarefas, status))');
   L.push('cat("Download complete. Files saved to:", download_folder, "\\n")');
   return L.join('\n');
@@ -1119,9 +1125,9 @@ async function makeFsSink(root, sub) {
   if (perm !== 'granted') perm = await root.requestPermission({ mode: 'readwrite' });
   if (perm !== 'granted') throw new Error('Permissão de escrita negada para a pasta escolhida.');
   const dir = sub ? await root.getDirectoryHandle(sub, { create: true }) : root;
-  const existing = new Set();
+  const existing = new Map();   // base name (sem extensão) -> nome do arquivo
   for await (const [name, h] of dir.entries()) {
-    if (h.kind === 'file' && !name.endsWith('.crswap')) existing.add(name.replace(/\.[^.]+$/, ''));
+    if (h.kind === 'file' && !name.endsWith('.crswap')) existing.set(name.replace(/\.[^.]+$/, ''), name);
   }
   return {
     label: '…/' + root.name + (sub ? '/' + sub : ''),
@@ -1146,7 +1152,7 @@ function makeZipSink(name) {
   const zip = new JSZip(), folder = zip.folder(name);
   return {
     label: name + '.zip',
-    existing: new Set(),
+    existing: new Map(),
     async create(fname) {
       const parts = [];
       return {
@@ -1231,9 +1237,9 @@ async function fetchOne(run, t) {
 }
 
 async function processTask(run, t) {
-  const rec = { row: t.row, id: t.id, col: t.col, url: t.url, file: '', status: '', bytes: 0, error: '' };
+  const rec = { row: t.row, id: t.id, col: t.col, k: t.k, url: t.url, file: '', status: '', bytes: 0, error: '' };
   if (run.skipExisting && run.sink.existing.has(t.base)) {
-    rec.status = 'skip'; rec.file = t.base + '.*'; rec.error = 'já existia na pasta';
+    rec.status = 'skip'; rec.file = run.sink.existing.get(t.base); rec.error = 'já existia na pasta';
     return rec;
   }
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -1308,11 +1314,18 @@ async function startRun(taskList) {
   renderRun();
 }
 
+/* One line per file: WgetLAB fields (prefixed, to avoid clashing with
+   original names such as "url" or "id") + every original CSV column. */
+const WL_FIELDS = ['wgetlab_linha', 'wgetlab_arquivo', 'wgetlab_status', 'wgetlab_coluna_url', 'wgetlab_url', 'wgetlab_bytes', 'wgetlab_erro'];
 function manifestCsv(log) {
-  return Papa.unparse(log.map(r => ({
-    linha: r.row, id: r.id, coluna: r.col, url: r.url, arquivo: r.file,
-    status: { ok: 'ok', fail: 'falhou', skip: 'já existia' }[r.status], bytes: r.bytes, erro: r.error
-  })));
+  const colIdx = c => state.columns.indexOf(c);
+  const sorted = log.slice().sort((a, b) => (a.row - b.row) || (colIdx(a.col) - colIdx(b.col)) || (a.k - b.k));
+  const data = sorted.map(r => {
+    const orig = state.rows[r.row - 1] || {};
+    return [r.row, r.file, { ok: 'ok', fail: 'falhou', skip: 'já existia' }[r.status], r.col, r.url, r.bytes, r.error]
+      .concat(state.columns.map(c => orig[c] ?? ''));
+  });
+  return '\uFEFF' + Papa.unparse({ fields: WL_FIELDS.concat(state.columns), data });
 }
 
 let logFilter = 'all';

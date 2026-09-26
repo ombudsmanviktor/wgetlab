@@ -19,7 +19,7 @@ Inspirado no fluxo `wget` em R muito usado em pesquisas com dados de plataformas
 - Detecta a extensão pela URL (`.jpg`, `?format=png`, `mime_type=video_mp4`) ou pelos bytes do arquivo (JPEG, PNG, GIF, WebP, MP4, M4A, MP3, WebM…)
 - Grava em streaming: vídeos grandes vão direto para o disco, sem ocupar a memória
 - Mostra o progresso e permite pausar e cancelar. Pode **pular arquivos já existentes**, o que permite retomar um download interrompido
-- Ao final, grava um manifesto `wgetlab_manifest_….csv` (linha, id, coluna, URL, arquivo, status, erro) e oferece a lista de falhas para exportar
+- Ao final, grava um manifesto `wgetlab_manifest_….csv` com **uma linha por arquivo**: nome do arquivo, status, coluna e URL de origem (campos `wgetlab_*`), seguidos de **todas as colunas originais do CSV**. Também oferece a lista de falhas para exportar
 - Gera um **script R** (tidyverse + `wget`) com os mesmos parâmetros, que baixa as mesmas linhas com os mesmos nomes de arquivo
 
 ## Formatos de célula reconhecidos
